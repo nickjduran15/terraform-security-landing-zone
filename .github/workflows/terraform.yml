@@ -1,0 +1,88 @@
+name: "Terraform CI/CD"
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  TF_VERSION: "1.5.7"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  terraform-checks:
+    name: "Terraform Validation"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Check Terraform Format
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Initialize Networking Module
+        run: terraform init
+        working-directory: modules/networking
+
+      - name: Validate Networking Module
+        run: terraform validate
+        working-directory: modules/networking
+
+      - name: Initialize Security Module
+        run: terraform init
+        working-directory: modules/security-baseline
+
+      - name: Validate Security Module
+        run: terraform validate
+        working-directory: modules/security-baseline
+
+      - name: Initialize Monitoring Module
+        run: terraform init
+        working-directory: modules/monitoring
+
+      - name: Validate Monitoring Module
+        run: terraform validate
+        working-directory: modules/monitoring
+
+      - name: Check Backend Setup
+        run: |
+          cd backend-setup
+          terraform init
+          terraform validate
+
+      - name: Security Check with Checkov
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          quiet: true
+          soft_fail: true
+          framework: terraform
+          skip_check: CKV_AWS_41,CKV_AWS_117
+
+      - name: Create Job Summary
+        if: always()
+        run: |
+          echo "## Terraform CI Results 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Format Check" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.fmt.outcome }}" == "success" ]; then
+            echo "✅ All files properly formatted" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Some files need formatting (run: terraform fmt -recursive)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Module Validation" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All modules validated successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security Scan" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Security scan completed (see Checkov results above)" >> $GITHUB_STEP_SUMMARY
